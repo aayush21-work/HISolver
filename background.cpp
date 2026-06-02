@@ -1,4 +1,3 @@
-// background.cpp — with cs2 output
 #include "model_potential.hpp"
 #include "model_generated.hpp"
 #include <cmath>
@@ -24,10 +23,8 @@ static double H_of(double phi, double dphi) {
 }
 
 static void rhs(double phi, double dphi, double &phi_N, double &dphi_N) {
-    double H   = H_of(phi, dphi);
-    double eps = epsilon_H(phi, dphi, H);
-    double dH  = -eps * H * H;
-    double dd  = ddphi_rhs(phi, dphi, H, dH);
+    double H  = H_of(phi, dphi);
+    double dd = ddphi_rhs(phi, dphi, H);   // decoupled: function of (phi,dphi,H)
     phi_N  = dphi / H;
     dphi_N = dd   / H;
 }
@@ -40,7 +37,7 @@ static double slow_roll_dphi(double phi) {
 }
 
 int main() {
-    double phi  = 4.5;
+    double phi  = 5;
     double dphi = slow_roll_dphi(phi);
     double N    = 0.0;
     const double dN=1e-4; const int we=10; const double Nmax=500;
@@ -52,8 +49,8 @@ int main() {
     auto write_row = [&](double N_, double phi_, double dphi_) {
         double H_   = H_of(phi_, dphi_);
         double eps_ = epsilon_H(phi_, dphi_, H_);
-        double dH_  = -eps_ * H_ * H_;
-        double dd_  = ddphi_rhs(phi_, dphi_, H_, dH_);
+        double dH_  = dH_rhs(phi_, dphi_, H_);      // decoupled
+        double dd_  = ddphi_rhs(phi_, dphi_, H_);   // decoupled
         double cs2_ = cs2(phi_, dphi_, H_, dH_, dd_);
         out << N_   << " " << phi_  << " " << dphi_ << " "
             << H_   << " " << std::log(H_) << " " << eps_ << " "
@@ -88,6 +85,9 @@ int main() {
              <<"\n  epsilon="<<e_end
              <<"\n  QT="<<QT(phi,dphi,H_end)
              <<"\n  cT2="<<cT2(phi,dphi,H_end)
-             <<"\n  Qs="<<Qs(phi,dphi,H_end)<<"\n";
+             <<"\n  Qs="<<Qs(phi,dphi,H_end)
+             <<"\n  cs2="<<cs2(phi,dphi,H_end,
+                                dH_rhs(phi,dphi,H_end),
+                                ddphi_rhs(phi,dphi,H_end))<<"\n";
     return 0;
 }
