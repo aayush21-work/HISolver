@@ -12,20 +12,6 @@ the G_i functions.  These are usually written in terms of auxiliary
 "w-functions" (following Kobayashi, Yamaguchi & Yokoyama 2011,
 arXiv:1105.5723, which is the standard reference we follow throughout).
 
-The four auxiliary functions are:
-
-    w1 = G4 - X*G5phi - X*dphi*H*G5X                      ... (K11 eq 2.8a)
-    w2 = G4 - 2X*G4X - X*G5phi/2 + X^2*G5phiX/2 - ...    ... (K11 eq 2.8b)
-          (full expression below)
-    w3 = dphi*( G3X - G4phiX - ... )  * 2H  + ...         ... (full below)
-    w4 = dphi * G5X * H^2  - ...                           ... (full below)
-
-From these, the Friedmann equation and KG equation follow.
-
-We follow the notation of:
-  Kobayashi, Yamaguchi, Yokoyama (KYY) 2011  arXiv:1105.5723
-  equations (2.4) -- (2.10)
-
 Gauge:   flat FLRW background,  ds^2 = -dt^2 + a^2 delta_{ij} dx^i dx^j
 Field:   phi = phi(t),  X = dphi^2 / 2
 """
@@ -46,19 +32,6 @@ from horndeski.symbols import (
     Mpl,
 )
 
-# =============================================================================
-# STEP 1 — Define the energy density and pressure of the Horndeski field
-#           in FLRW.  These come from KYY (2011) eqs (2.4)-(2.7).
-#
-#   The Friedmann equations are:
-#       3 H^2  =  rho_phi       (energy constraint)
-#      -2 dH   =  rho_phi + p_phi   (Raychaudhuri)
-#
-#   Both rho_phi and p_phi are expressed in terms of G_i and their
-#   derivatives evaluated at (phi_sym, X_sym), then we substitute
-#   X_sym -> dphi^2/2 at the end.
-# =============================================================================
-
 def energy_density():
     """
     Compute the Horndeski energy density  rho_phi  in flat FLRW.
@@ -70,30 +43,20 @@ def energy_density():
     Reference: KYY (2011) eq (2.4)
     """
 
-    # --- G2 contribution ---
-    # rho_2 = 2X G2X - G2
+    
     rho_2 = 2*X_sym*G2X - G2
 
-    # --- G3 contribution ---
-    # rho_3 = -2X G3phi  +  6 X H dphi G3X
-    # Note: the dphi here is the field velocity; H dphi comes from
-    # the integration-by-parts of the G3 Box(phi) term on FLRW
+   
     rho_3 = ( - 2*X_sym * G3phi
               + 6*X_sym * H * dphi * G3X )
 
-    # --- G4 contribution ---
-    # rho_4 = -6 H^2 G4
-    #        + 24 H^2 X (G4X + X G4XX)
-    #        - 12 H X dphi G4phiX          <- from int-by-parts of R term
-    #        - 6 H dphi G4phi              <- idem
+    
     rho_4 = ( - 6 * H**2 * G4
               + 24 * H**2 * X_sym * (G4X + X_sym*G4XX)
               - 12 * H * X_sym * dphi * G4phiX
               - 6  * H * dphi * G4phi )
 
-    # --- G5 contribution ---
-    # rho_5 = -6 H^2 X (3 G5phi + 2X G5phiX)
-    #        + 2 H^3 dphi X (5 G5X + 2X G5XX)
+    
     rho_5 = ( - 6  * H**2 * X_sym * (3*G5phi + 2*X_sym*G5phiX)
               + 2  * H**3 * dphi  * X_sym * (5*G5X + 2*X_sym*G5XX) )
 
@@ -104,68 +67,39 @@ def energy_density():
 
 def pressure():
     """
-    Compute the Horndeski pressure  p_phi  in flat FLRW.
-
-    Returns a SymPy expression in terms of:
-        phi_sym, X_sym, H, dH, dphi, ddphi
-
-    Reference: KYY (2011) eq (2.5)
+    Horndeski pressure p_phi in flat FLRW, with  -2 dH = rho_phi + p_phi.
+    Transcribed from KYY (2011) P_i, eqs (3.7)-(3.10).  G2 == K.
     """
+    def ddt(e):
+        return (diff(e, dphi)*ddphi
+                + diff(e, X_sym)*(dphi*ddphi)
+                + diff(e, H)*dH)
 
-    # --- G2 contribution ---
-    # p_2 = G2
-    p_2 = G2
+    Xdot = dphi*ddphi
 
-    # --- G3 contribution ---
-    # p_3 = -2X(G3phi + G3X * ddphi)
-    # The ddphi comes from Box(phi) = -ddphi - 3H dphi on FLRW
-    p_3 = -2*X_sym * (G3phi + G3X * ddphi)
+    P2 = G2
 
-    # --- G4 contribution ---
-    # p_4 = (2 dH + 3 H^2)(2 G4 - 4X G4X)   <- the GR-like part
-    #      - 8 dH X G4X
-    #      - 8 H dphi X G4phiX               <- from variation
-    #      + (2 ddphi + 6 H dphi) G4phi
-    #      + 4 X (ddphi + 3 H dphi) G4phiX   <- idem
-    #      - 4 X (dH + 3 H^2) G4XX * 2X      <- second X deriv piece
-    #      + 4 X G4phi * (ddphi/dphi... )     <- careful below
-    #
-    # Following KYY exactly:
-    p_4 = (   2*(2*dH + 3*H**2) * (G4 - 2*X_sym*G4X)
-            - 8*dH * X_sym * G4X
-            + 4 * X_sym * (ddphi + 3*H*dphi) * G4phiX
-            - 8 * H * X_sym * dphi * G4phiX
-            + (2*ddphi + 6*H*dphi) * G4phi
-            - 16 * H * X_sym * dphi * G4XX * X_sym   # = -16H X^2 dphi G4XX
-            # note: last term comes from the 4X^2 G4XX in rho being time-differentiated
-            )
+    P3 = -2*X_sym*(G3phi + ddphi*G3X)
 
-    # --- G5 contribution ---
-    # p_5 is the most involved.  Following KYY (2011) eq (2.5):
-    # p_5 = 2 X G5phi (ddphi - 2 H dphi)
-    #      - 2 X^2 G5phiX (ddphi/dphi ... )
-    #      ... full expression:
-    p_5 = (   2  * X_sym * G5phi * (ddphi - 2*H*dphi)
-            - 4  * X_sym * H * dphi * G5phi
-            - 2  * H**2 * X_sym * (3*G5phi + 2*X_sym*G5phiX)
-            + 2  * H**2 * X_sym * dphi * (G5X + X_sym*G5XX) * ddphi
-            + 4  * H    * X_sym * dphi * G5phiX * ddphi
-            - 4  * H**3 * X_sym * dphi * (G5X + X_sym*G5XX)
-            )
+    # KYY (3.9)
+    P4 = ( 2*(3*H**2 + 2*dH)*G4
+           - 12*H**2*X_sym*G4X
+           - 4*H*dH*X_sym*G4X
+           - 8*H*Xdot*G4X
+           - 8*H*X_sym*Xdot*G4XX
+           + 2*(ddphi + 2*H*dphi)*G4phi
+           + 4*X_sym*(ddphi - 2*H*dphi)*G4phiX )
 
-    p_total = p_2 + p_3 + p_4 + p_5
+    # KYY (3.10)
+    P5 = ( -2*X_sym*(2*H**3*dphi + 2*H*dH*dphi + 3*H**2*ddphi)*G5X
+           - 4*H**2*X_sym**2*ddphi*G5XX
+           + 4*H*X_sym*(Xdot - H*X_sym)*G5phiX
+           + 2*(2*ddt(H*X_sym) + 3*H**2*X_sym)*G5phi
+           + 4*H*X_sym*dphi*diff(G5phi, phi_sym) )
 
-    return p_total
+    return P2 + P3 + P4 + P5
 
 
-# =============================================================================
-# STEP 2 — Friedmann equations
-#
-#   First Friedmann:    3 H^2 = rho_phi
-#   Raychaudhuri:      -2 dH  = rho_phi + p_phi
-#
-#   These are the two background equations before reducing to a 2D ODE.
-# =============================================================================
 
 def friedmann_constraint():
     """
@@ -194,112 +128,60 @@ def raychaudhuri():
     return Eq(-2*dH, rho + p)
 
 
-# =============================================================================
-# STEP 3 — Klein-Gordon equation
-#
-#   The KG equation in Horndeski is not simply  ddphi + 3H dphi + V' = 0.
-#   It is modified by the G3, G4, G5 couplings.
-#
-#   The general form (KYY 2011 eq 2.9) is:
-#
-#     P_ddphi * ddphi  +  P_dH * dH  +  P_0  =  0
-#
-#   where P_ddphi, P_dH, P_0 are functions of (phi, dphi, H) only
-#   (no ddphi or dH inside them).
-#
-#   We derive this by varying the action w.r.t. phi and reading off
-#   the coefficient of the highest derivative term.
-# =============================================================================
 
 def KG_coefficients():
     """
-    Returns the three coefficient functions in the KG equation:
+    Klein-Gordon coefficients (P_ddphi, P_dH, P_0) such that
+        P_ddphi * ddphi + P_dH * dH + P_0 = 0.
 
-        P_ddphi(phi, dphi, H) * ddphi
-      + P_dH   (phi, dphi, H) * dH
-      + P_0    (phi, dphi, H)
-      = 0
-
-    These are derived from KYY (2011) eq (2.9) / (2.10).
-
-    The user can solve for ddphi:
-        ddphi = -(P_dH * dH + P_0) / P_ddphi
-
-    And dH from the Raychaudhuri equation.
-
-    Returns
-    -------
-    P_ddphi, P_dH, P_0  as SymPy expressions
+    Derived from the KYY scalar EOM  d/dt(a^3 J) = a^3 P_phi, i.e.
+        Jdot + 3H J - P_phi = 0,
+    with J from KYY (3.12) and P_phi from KYY (3.13).  G2 == K.
+    The three coefficients are read off by collecting ddphi and dH.
     """
+    G3phiphi = diff(G3phi, phi_sym)
+    G5phiphi = diff(G5phi, phi_sym)
+    Xdot = dphi*ddphi
 
-    # -----------------------------------------------------------------------
-    # Following KYY (2011) eq (2.9) exactly.
-    # The KG equation written out is:
-    #
-    #   J_dot  +  3H J  +  P_X * ddphi  =  G2phi - 2X G3phi + ...
-    #
-    # where J = dphi * (G2X + 2X G2XX + ...) is the generalised momentum.
-    #
-    # After collecting all ddphi terms on one side, the three coefficient
-    # functions are:
-    #
-    # P_ddphi — coefficient of ddphi:
-    #   = G2X + 2X G2XX                          (from G2)
-    #   + 3H dphi (G3X + X G3XX)                 (from G3, friction-like)
-    #   + 6H^2 (G4X + X G4XX)                    (from G4, NOTE: + sign)
-    #   + 6H^3 dphi (G5X + X G5XX)               (from G5)
-    #
-    # P_dH — coefficient of dH (= H_dot):
-    #   = 6H dphi G4X                             (from G4)
-    #   - 6H^2 X G5X                              (from G5, NOTE: - sign)
-    #
-    # P_0 — all remaining terms (no ddphi, no dH):
-    #   = G2phi                                   (from G2)
-    #   - 2X G3phi                                (from G3)
-    #   - 3H dphi G3phi                           (from G3 friction)
-    #   - 6H^2 G4phi                              (from G4, NOTE: - sign)
-    #   + 6H^3 dphi G5phi                         (from G5, NOTE: + sign)
-    #   + 3H dphi G2X                             (standard friction)
-    #   + 6H X dphi G3XX                          (from G3)
-    #
-    # For GR canonical (G2=X-V, G3=G5=0, G4=Mpl^2/2):
-    #   P_ddphi = 1,  P_dH = 0,  P_0 = -V'(phi)
-    #   Full EOM: ddphi + 3H dphi + V' = 0   (3H dphi from Raychaudhuri)
-    # -----------------------------------------------------------------------
+    # KYY (3.12)
+    J = ( dphi*G2X + 6*H*X_sym*G3X - 2*dphi*G3phi
+          + 6*H**2*dphi*(G4X + 2*X_sym*G4XX) - 12*H*X_sym*G4phiX
+          + 2*H**3*X_sym*(3*G5X + 2*X_sym*G5XX)
+          - 6*H**2*dphi*(G5phi + X_sym*G5phiX) )
 
-    # Coefficient of ddphi
-    # G2 piece: G2X + 2X G2XX  (note: G2XX = diff(G2X, X_sym), not G2X again)
-    P_ddphi = (   G2X  +  2*X_sym * diff(G2X, X_sym)        # G2 piece: G2X + 2X*G2XX
-               +  3*H * dphi * (G3X + X_sym*G3XX)           # G3 piece
-               +  3*H**2 * (G4X + X_sym*G4XX)               # G4 piece (+sign)
-               +  6*H**3 * dphi * (G5X + X_sym*G5XX)        # G5 piece
-             )
+    # KYY (3.13)
+    P_phi = ( G2phi - 2*X_sym*(G3phiphi + ddphi*G3phiX)
+              + 6*(2*H**2 + dH)*G4phi + 6*H*(Xdot + 2*H*X_sym)*G4phiX
+              - 6*H**2*X_sym*G5phiphi + 2*H**3*X_sym*dphi*G5phiX )
 
-    # Coefficient of dH
-    P_dH = (   6*H * dphi * G4X                             # G4 piece (+sign)
-             - 6*H**2 * X_sym * G5X                         # G5 piece (-sign)
-           )
+    def ddt(e):
+        return (diff(e, dphi)*ddphi
+                + diff(e, X_sym)*(dphi*ddphi)
+                + diff(e, H)*dH
+                + diff(e, phi_sym)*dphi)
 
-    # Remaining terms
-    P_0 = (   G2phi                                         # G2 potential
-            + 3*H * dphi * G2X                              # standard friction
-            - 2*X_sym * G3phi                               # G3 phi-deriv
-            - 3*H * dphi * G3phi                            # G3 friction
-            + 6*H * X_sym * dphi * G3XX                     # G3 X-deriv friction
-            - 6*H**2 * G4phi                                # G4 phi-coupling (-sign)
-            + 6*H**3 * dphi * G5phi                         # G5 phi-coupling (+sign)
-          )
+    KG = ddt(J) + 3*H*J - P_phi   # = P_ddphi*ddphi + P_dH*dH + P_0
+
+    P_ddphi = KG.diff(ddphi)
+    P_dH    = KG.diff(dH)
+    P_0     = (KG - P_ddphi*ddphi - P_dH*dH)
 
     return P_ddphi, P_dH, P_0
 
 
-# =============================================================================
-# STEP 4 — Slow-roll parameters
-#
-#   epsilon_H = -dH / H^2
-#   eta_H     = epsilon_H_dot / (H * epsilon_H)
-#   delta     = ddphi / (H dphi)    (field acceleration parameter)
-# =============================================================================
+
+def klein_gordon():
+    """
+    Full scalar (Klein-Gordon) field equation as a single expression,
+    parallel to energy_density() and pressure().
+
+    Returns the residual  R  such that the equation of motion is  R = 0,
+    with  R = P_ddphi*ddphi + P_dH*dH + P_0  (= Jdot + 3H J - P_phi).
+    """
+    P_ddphi, P_dH, P_0 = KG_coefficients()
+    return P_ddphi*ddphi + P_dH*dH + P_0
+
+
 
 def slow_roll_epsilon():
     """
@@ -323,12 +205,7 @@ def slow_roll_delta():
     return ddphi / (H * dphi)
 
 
-# =============================================================================
-# STEP 5 — Substitution helper
-#
-#   After the user defines their model in model.py, call this to substitute
-#   G2=..., G3=..., G4=..., G5=... into any of the above expressions.
-# =============================================================================
+
 
 def substitute_model(expr, G2_model, G3_model, G4_model, G5_model):
     """
@@ -370,9 +247,9 @@ def substitute_model(expr, G2_model, G3_model, G4_model, G5_model):
     return simplify(expr.subs(subs_dict))
 
 
-# =============================================================================
-# STEP 6 — Pretty-print summary  (run this file directly to check)
-# =============================================================================
+
+# Pretty-print with some defaults for sanity check
+
 
 if __name__ == "__main__":
 
@@ -422,10 +299,6 @@ if __name__ == "__main__":
     # --- energy density ---
     rho_GR = substitute_model(energy_density(), G2_GR, G3_GR, G4_GR, G5_GR)
     rho_GR = rho_GR.subs(X_sym, dphi**2/2)
-    # For GR: G4 = Mpl^2/2, so the -6 H^2 G4 term gives -3 Mpl^2 H^2.
-    # The Friedmann equation is  3 Mpl^2 H^2 = dphi^2/2 + V
-    # so rho_GR should equal dphi^2/2 + V (the -3Mpl^2 H^2 is the LHS moved over).
-    # Let's show both sides explicitly:
     print("\n  Friedmann: 3*Mpl^2*H^2 = rho_phi")
     print("  Full rho_phi expression (LHS includes -3Mpl^2 H^2 from G4):")
     pprint(rho_GR)
