@@ -1,3 +1,4 @@
 *.dat
 *.old
 .ipynb_checkpoints
+*.pdf
