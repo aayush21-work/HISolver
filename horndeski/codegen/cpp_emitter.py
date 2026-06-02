@@ -58,9 +58,6 @@ from horndeski.algebra.background import (
 )
 from horndeski.algebra.perturbations import substitute_perturbations
 
-# =============================================================================
-# Helper: substitution dict  SymPy functions -> plain C variable names
-# =============================================================================
 
 def _make_subs(V_expr, dV_expr):
     """
@@ -91,9 +88,7 @@ def _make_subs(V_expr, dV_expr):
     }
 
 
-# =============================================================================
-# Helper: emit a single inline C function
-# =============================================================================
+
 
 def _emit_function(name, args, expr, subs, printer,
                    V_expr=None, dV_expr=None,
@@ -147,9 +142,7 @@ def _emit_function(name, args, expr, subs, printer,
     return "\n".join(lines)
 
 
-# =============================================================================
-# Main emitter
-# =============================================================================
+
 
 def emit_model(G2_model, G3_model, G4_model, G5_model,
                model_name  = "Horndeski",
@@ -174,14 +167,14 @@ def emit_model(G2_model, G3_model, G4_model, G5_model,
 
     printer = C99CodePrinter()
 
-    # ── Step 1: substitute model into all expressions ────────────────
+    # Substitute model into all expressions
     print(f"[codegen] Substituting {model_name} model into background equations...")
 
     # Background
     rho_expr = substitute_model(energy_density(), G2_model, G3_model,
                                  G4_model, G5_model)
     rho_expr = simplify(rho_expr.subs(X_sym, dphi**2/2))
-    # rho_phi is the RHS of 3H^2 = rho -- move -3Mpl^2 H^2 to LHS
+   
     rho_rhs  = simplify(rho_expr + 3*Mpl**2*H**2)
 
     P_ddphi_expr, P_dH_expr, P0_expr = [
@@ -190,23 +183,46 @@ def emit_model(G2_model, G3_model, G4_model, G5_model,
         for c in KG_coefficients()
     ]
 
-    # Raychaudhuri: -2*dH = rho + p  -> solve for dH
+    
     p_expr = substitute_model(pressure(), G2_model, G3_model,
                                G4_model, G5_model)
     p_expr = simplify(p_expr.subs(X_sym, dphi**2/2))
 
+   
     from sympy import solve, Eq
-    ray_eq  = Eq(-2*dH, rho_expr + p_expr)
-    dH_sol  = solve(ray_eq, dH)[0]
-    dH_rhs  = simplify(dH_sol)
+    V_subs = None
+    if V_expr is not None and isinstance(V_expr, Function):
+        fried = Eq(3*Mpl**2*H**2, rho_rhs)        # rho_rhs still contains V
+        Vsol  = solve(fried, V_expr)
+        if Vsol:
+            V_subs = Vsol[0]
 
-    # ddphi from KG: solve for ddphi using dH_rhs
-    ddphi_rhs = simplify(
-        -(P_dH_expr * dH_rhs + P0_expr) / P_ddphi_expr
-    )
+    
+    kg_eq  = Eq(P_ddphi_expr*ddphi + P_dH_expr*dH + P0_expr, 0)
+    evo_eq = Eq(p_expr, 0)
 
-    # epsilon_H = -dH/H^2  (using dH_rhs)
+    sol = solve([kg_eq, evo_eq], [ddphi, dH], dict=True)
+    if not sol:
+        raise RuntimeError("Could not solve coupled {KG, evolution} "
+                           "system for (ddphi, dH).")
+    sol = sol[0]
+    ddphi_rhs = simplify(sol[ddphi])
+    dH_rhs    = simplify(sol[dH])
+
+    
+    if V_subs is not None:
+        dH_rhs = simplify(dH_rhs.subs(V_expr, V_subs))
+
+    
     epsilon_expr = simplify(-dH_rhs / H**2)
+
+   
+    for nm, ex in [("ddphi_rhs", ddphi_rhs), ("dH_rhs", dH_rhs),
+                   ("epsilon_H", epsilon_expr)]:
+        leftover = {s for s in ex.free_symbols if s in (ddphi, dH)}
+        if leftover:
+            raise RuntimeError(f"{nm} still depends on {leftover} after "
+                               f"joint solve -- coupling not fully removed.")
 
     print(f"[codegen] Computing perturbation coefficients...")
 
@@ -217,7 +233,7 @@ def emit_model(G2_model, G3_model, G4_model, G5_model,
     Qs_expr  = res['Qs']
     cs2_expr = res['cs2']
 
-    # ── Step 2: build substitution dict ─────────────────────────────
+  
     if V_expr is None:
         # create a placeholder
         V_expr  = Function('V')(phi_sym)
@@ -225,7 +241,7 @@ def emit_model(G2_model, G3_model, G4_model, G5_model,
 
     subs = _make_subs(V_expr, dV_expr)
 
-    # ── Step 3: assemble the header ──────────────────────────────────
+    
     print(f"[codegen] Emitting C++ header to {output_path}...")
 
     lines = []
@@ -299,7 +315,7 @@ def emit_model(G2_model, G3_model, G4_model, G5_model,
 
     lines.append(_emit_function(
         "dH_rhs",
-        [("double","phi"), ("double","dphi"), ("double","H"), ("double","ddphi")],
+        [("double","phi"), ("double","dphi"), ("double","H")],
         dH_rhs, subs, printer,
         V_expr  = V_expr  if _needs(dH_rhs,    V_c)  else None,
         dV_expr = dV_expr if _needs(dH_rhs,    dV_c) else None,
@@ -371,7 +387,7 @@ def emit_model(G2_model, G3_model, G4_model, G5_model,
     lines.append(f"}}")
     lines.append(f"")
 
-    # ── write file ────────────────────────────────────────────────────
+    
     content = "\n".join(lines)
     with open(output_path, "w") as f:
         f.write(content)
@@ -385,9 +401,7 @@ def emit_model(G2_model, G3_model, G4_model, G5_model,
     return content
 
 
-# =============================================================================
-# Run directly to generate NMDC model header
-# =============================================================================
+#Built in defaults
 
 if __name__ == "__main__":
     from horndeski.symbols import phi_sym, X_sym, Mpl, M
