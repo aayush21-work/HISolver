@@ -4,8 +4,6 @@
 // Reads background.dat, solves MS equation for each k mode,
 // outputs primordial power spectra P_R(k) and P_T(k).
 //
-// CRITICAL: the MS equation in N-time uses k/(a*H) = (k/H)*e^{-N}
-// NOT k/H.  The scale factor a = e^N (with a0=1).
 
 #include "model_potential.hpp"
 #include "model_generated.hpp"
@@ -77,21 +75,12 @@ static double dX_dN(const std::vector<BGPoint> &tr, double N,
     return (interp(tr,N+dN,f)-interp(tr,N-dN,f))/(2*dN);
 }
 
-// =============================================================================
-// MS equation RHS in N-time
-//
-// Scalar:
-//   R'' + (3 + eps + Qs_N/Qs) * R' + cs2*(k/(aH))^2 * R = 0
-//
-// Tensor:
-//   h'' + (3 - eps + QT_N/QT) * h' + cT2*(k/(aH))^2 * h = 0
-//
-// where ' = d/dN and (k/(aH))^2 = (k/H)^2 * e^{-2N}
-//
-// State: y = (Re, Im, Re', Im')
-// =============================================================================
 
-struct Mode { double Re, Im, ReP, ImP; };
+struct Mode
+{
+    double Re, Im, ReP, ImP ;
+
+ };
 
 static Mode scalar_rhs(const Mode &y, double N, double k,
                         const std::vector<BGPoint> &tr) {
@@ -100,8 +89,6 @@ static Mode scalar_rhs(const Mode &y, double N, double k,
     double Qs_  = BG(Qs_val);
     double cs2_ = BG(cs2_val);
     double QsN_ = dX_dN(tr, N, &BGPoint::Qs_val);
-
-    // k/(aH) = (k/H)*exp(-N)  — this is the KEY fix
     double x    = (k / H_) * std::exp(-N);
     double fric = 3.0 + eps_ + QsN_/Qs_;
     double om2  = cs2_ * x * x;
@@ -144,18 +131,17 @@ static Mode rk4_MS(const Mode &y, double N, double dN, double k,
              y.ImP+(dN/6)*(a.ImP+2*b.ImP+2*c.ImP+d.ImP) };
 }
 
-// =============================================================================
-// Solve one mode k
-// =============================================================================
+
 
 static double solve_mode(double k, bool scalar,
                           const std::vector<BGPoint> &tr) {
 
     const double x_init   = 50.0;   // k/(aH) at IC  (subhorizon)
-    const double x_freeze = 0.01;   // k/(aH) at superhorizon freeze-out
+    const double x_freeze = 0.05;   // k/(aH) at superhorizon freeze-out
+    const double dN_past  = 4.0;    // e-folds past horizon exit to evaluate at
+                                    // (clamped to end of background)
 
-    // ── Find N_init: where k/(aH) = x_init ──────────────────────────
-    // k/(aH) = (k/H)*exp(-N) = x_init  =>  H*exp(N) = k/x_init
+
     double target_init = k / x_init;
     double N_init = tr.front().N;
     bool found = false;
@@ -169,15 +155,12 @@ static double solve_mode(double k, bool scalar,
         }
     }
     if (!found) {
-        // Mode never enters subhorizon regime in trajectory
-        // Use start of trajectory
-        N_init = tr.front().N;
+        // No clean Bunch-Davies start: the mode never crosses k/(aH)=x_init
+        // inside the stored trajectory (it begins already superhorizon, or
+        // would enter only after the background ends). 
+        return -1.0;
     }
 
-    // ── Bunch-Davies ICs ─────────────────────────────────────────────
-    // In conformal time: R_k = 1/(z*sqrt(2*cs*k)) * exp(-i*cs*k*tau)
-    // z = a*sqrt(2*Qs), so |R_k| = 1/(a*sqrt(2*Qs)*sqrt(2*cs*k))
-    // In N-time: a = exp(N), so amplitude = 1/(exp(N)*sqrt(2*Qs)*sqrt(2*cs*k))
     double H0   = interp(tr, N_init, &BGPoint::H);
     double Qs0  = interp(tr, N_init, &BGPoint::Qs_val);
     double QT0  = interp(tr, N_init, &BGPoint::QT_val);
@@ -203,17 +186,26 @@ static double solve_mode(double k, bool scalar,
     y.ReP =  freq * y.Im;
     y.ImP = -freq * y.Re;
 
-    // ── Integrate until superhorizon ─────────────────────────────────
+    // Integrate until the mode has frozen well outside the horizon 
+    
     const double dN = 5e-4;
     double N = N_init;
+    double N_exit = -1e30;   // N at which x crosses 1 (horizon exit)
+    double x_prev = (k / interp(tr, N, &BGPoint::H)) * std::exp(-N);
 
-    while (N < tr.back().N - dN) {
-        // k/(aH) = (k/H)*exp(-N)
-        double H_   = interp(tr, N, &BGPoint::H);
-        double x    = (k / H_) * std::exp(-N);
-        if (x < x_freeze) break;   // superhorizon — freeze
+    const double N_last = tr.back().N;
+    while (N < N_last - dN) {
+        double H_ = interp(tr, N, &BGPoint::H);
+        double x  = (k / H_) * std::exp(-N);
 
-        double dN_step = std::min(dN, tr.back().N - N - dN);
+        // record horizon exit (x passes through 1 from above)
+        if (x_prev >= 1.0 && x < 1.0) N_exit = N;
+        x_prev = x;
+
+        // freeze condition: superhorizon AND enough e-folds since exit
+        if (x < x_freeze && (N - N_exit) >= dN_past) break;
+
+        double dN_step = std::min(dN, N_last - N - dN);
         if (dN_step <= 0) break;
         y = rk4_MS(y, N, dN_step, k, tr, scalar);
         N += dN_step;
@@ -229,19 +221,9 @@ static double solve_mode(double k, bool scalar,
 int main() {
     auto tr = load_background("background.dat");
 
-    // ── k grid ───────────────────────────────────────────────────────
-    // Physical pivot scale k* = 0.05 Mpc^{-1}.
-    // In our units k is dimensionless (Planck units).
-    // The mapping: k_phys = k_code * H_* / (aH)_exit
-    // We scan around the horizon-exit scale.
-    // aH at N=0 is H0*exp(0) = H0 ~ 5.6e-6
-    // aH at N=60 is H_end*exp(60) ~ 3e20
-    // Modes of interest exit at N ~ 5-55 (CMB scales)
-    // Their k values: k = aH_exit = H(N_exit)*exp(N_exit)
+    const int    N_k    = 400;   // wider k-range -> more samples
 
-    const int    N_k    = 100;
-
-    // k_star: exits horizon 55 e-folds before end (CMB pivot convention)
+    // k_star: exits horizon 55 e-folds before (change accordingly)
     double N_end  = tr.back().N;
     double N_star = N_end - 55.0;
     double k_star = tr.front().H * std::exp(tr.front().N);
@@ -253,9 +235,20 @@ int main() {
             break;
         }
     }
-    const double k_min = k_star * 1e-2;
-    const double k_max = k_star * 1e2;
-    std::cout << "k_star=" << k_star << " k_min=" << k_min << " k_max=" << k_max << "\n";
+    const double x_init_g   = 50.0;   // must match solve_mode x_init
+    const double x_freeze_g = 0.05;   // must match solve_mode x_freeze
+    const double margin     = 2.0;
+    double aH_first = tr.front().H * std::exp(tr.front().N);
+    double aH_last  = tr.back().H  * std::exp(tr.back().N);
+    double k_min = aH_first * x_init_g   * std::exp(+margin);
+    double k_max = aH_last  * x_freeze_g * std::exp(-margin);
+    if (k_max <= k_min) {           // too short rejected
+        k_min = k_star * 1e-2;
+        k_max = k_star * 1e2;
+    }
+    std::cout << "k_star=" << k_star
+              << " k_min=" << k_min << " k_max=" << k_max
+              << "  (decades=" << std::log10(k_max/k_min) << ")\n";
 
     std::vector<double> k_grid(N_k);
     double lk0 = std::log(k_min), lk1 = std::log(k_max);
@@ -264,8 +257,8 @@ int main() {
 
     std::ofstream out_s("scalar_spectrum.dat");
     std::ofstream out_t("tensor_spectrum.dat");
-    out_s << std::setprecision(12);
-    out_t << std::setprecision(12);
+    out_s << std::setprecision(15);
+    out_t << std::setprecision(15);
     out_s << "# k  Rk2  Delta2_s\n";
     out_t << "# k  hk2  Delta2_t\n";
 
@@ -281,12 +274,22 @@ int main() {
         double Rk2 = solve_mode(k, true,  tr);
         double hk2 = solve_mode(k, false, tr);
 
+        // skip modes without a clean Bunch-Davies start / valid solve
+        if (Rk2 < 0.0 || hk2 < 0.0 ||
+            !std::isfinite(Rk2) || !std::isfinite(hk2)) {
+            P_s[i] = -1.0; P_t[i] = -1.0;
+            continue;
+        }
+
         double pref = k*k*k / (2.0*M_PI*M_PI);
         P_s[i] = pref * Rk2;
-        P_t[i] = pref * hk2 * 2.0;
+        P_t[i] = pref * hk2 * 4.0;
 
-        out_s << k << " " << Rk2 << " " << P_s[i] << "\n";
-        out_t << k << " " << hk2 << " " << P_t[i] << "\n";
+        // out_s << k << " " << Rk2 << " " << P_s[i] << "\n";
+        out_s << k/k_star <<  " " << P_s[i] << "\n";
+        //out_t << k << " " << hk2 << " " << P_t[i] << "\n";
+        out_t << k/k_star <<  " " << P_t[i] << "\n";
+
 
         if (std::fabs(k-k_star) < k_star_dist) {
             k_star_dist = std::fabs(k-k_star);
@@ -295,16 +298,20 @@ int main() {
             P_t_star = P_t[i];
         }
 
-        if (i%10==0)
-            std::cout << "  k=" << k
-                      << "  D2_s=" << P_s[i]
-                      << "  D2_t=" << P_t[i] << "\n";
+        //if (i%10==0)
+            //std::cout << "  k=" << k
+                      //<< "  D2_s=" << P_s[i]
+                      //<< "  D2_t=" << P_t[i] << "\n";
     }
+    
 
-    // ── Spectral indices ─────────────────────────────────────────────
+    // Spectral indices 
     int i0=std::max(0,i_star-3), i1=std::min(N_k-1,i_star+3);
+    // nudge i0/i1 off any skipped (-1) samples
+    while (i0 < i_star && P_s[i0] <= 0.0) ++i0;
+    while (i1 > i_star && P_s[i1] <= 0.0) --i1;
     double ns=1.0, nT=0.0;
-    if (P_s[i0]>0 && P_s[i1]>0)
+    if (i1>i0 && P_s[i0]>0 && P_s[i1]>0)
         ns = 1.0 + (std::log(P_s[i1])-std::log(P_s[i0]))
                   /(std::log(k_grid[i1])-std::log(k_grid[i0]));
     if (P_t[i0]>0 && P_t[i1]>0)
@@ -314,7 +321,7 @@ int main() {
     double r_eff = (P_s_star>0) ? P_t_star/P_s_star : 0.0;
 
     std::ofstream sum("spectra_summary.dat");
-    sum << std::setprecision(10);
+    sum << std::setprecision(15);
     sum << "# Primordial power spectrum summary\n";
     sum << "# k_star = " << k_star << "\n";
     sum << "A_s = " << P_s_star << "\n";
@@ -323,7 +330,7 @@ int main() {
     sum << "A_T = " << P_t_star << "\n";
     sum << "n_T = " << nT       << "\n";
 
-    std::cout << "\n━━━  Results at k_star ━━━\n"
+    std::cout << "Results at k_star \n"
               << "  A_s = " << P_s_star << "\n"
               << "  n_s = " << ns       << "\n"
               << "  r   = " << r_eff    << "\n"
