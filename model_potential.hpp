@@ -13,18 +13,18 @@
 #pragma once
 #include <cmath>
 
-// ── Potential parameters ──────────────────────────────────────────
+// Potential parameters 
 static constexpr double V0    = 1.0e-10;   // amplitude  (Planck units)
 static constexpr double m_phi = 1.0;       // mass scale (Planck units)
 
-// ── V(phi) ────────────────────────────────────────────────────────
+// V(phi) 
 inline double V_phi(double phi) {
     double phi2 = phi * phi;
     double m2   = m_phi * m_phi;
     return V0 * phi2 / (m2 + phi2);
 }
 
-// ── dV/dphi ───────────────────────────────────────────────────────
+// dV/dphi 
 inline double dV_phi(double phi) {
     double phi2 = phi * phi;
     double m2   = m_phi * m_phi;
